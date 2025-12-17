@@ -1,20 +1,83 @@
 {
     "male_files": [
         {
-            "name": "burning_effect.deepar",
-            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/burning_effect.deepar"
+            "name": "African.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/African.deepar?raw=true"
+        },
+        {
+            "name": "Stallone.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/Stallone.deepar?raw=true"
+        },
+        {
+            "name": "asian.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/asian.deepar?raw=true"
+        },
+        {
+            "name": "euro.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/euro.deepar?raw=true"
+        },
+        {
+            "name": "indian.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/indian.deepar?raw=true"
+        },
+        {
+            "name": "inesien.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/inesien.deepar?raw=true"
+        },
+        {
+            "name": "keanu-reeves.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/keanu-reeves.deepar?raw=true"
+        },
+        {
+            "name": "ryanGossiling.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/ryanGossiling.deepar?raw=true"
+        },
+        {
+            "name": "ryanRenold.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/ryanRenold.deepar?raw=true"
+        },
+        {
+            "name": "test_euro_guy.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/test_euro_guy.deepar?raw=true"
+        },
+        {
+            "name": "vikingHelmet.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/male/vikingHelmet.deepar?raw=true"
         }
     ],
     "female_files": [
         {
             "name": "MakeupLook.deepar",
-            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/MakeupLook.deepar"
-        }
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/female/MakeupLook.deepar?raw=true"
+        },
+        {
+            "name": "Elephant_Trunk.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/female/Elephant_Trunk.deepar?raw=true"
+        },
+        {
+            "name": "makeup.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/female/makeup.deepar?raw=true"
+        },
+        {
+            "name": "queen.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/female/queen.deepar?raw=true"}
     ],
     "both_files": [
         {
-            "name": "Elephant_Trunk.deepar",
-            "url": "https://github.com/AhmadEnan/Morphy/raw/refs/heads/main/assets/effects/Elephant_Trunk.deepar?raw=true"
+            "name": "sunGlasses.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/both/sunGlasses.deepar?raw=true"
+        },
+        {
+            "name": "Emotions_Exaggerator.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/both/Emotions_Exaggerator.deepar?raw=true"
+        },
+        {
+            "name": "cat.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/both/cat.deepar?raw=true"
+        },
+        {
+            "name": "glowingEyes.deepar",
+            "url": "https://github.com/AhmadEnan/Morphy/blob/main/assets/effects/both/glowingEyes.deepar?raw=true"
         }
     ]
 }

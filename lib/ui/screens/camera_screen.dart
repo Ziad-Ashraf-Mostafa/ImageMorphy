@@ -248,6 +248,12 @@ class _CameraScreenState extends State<CameraScreen> {
     });
     // Switch DeepAR effect
     _deepARService.switchEffect(filter.effectFile);
+
+    // Apply current intensity to the new filter
+    if (_isDeepARInitialized) {
+      _deepARService.setFilterIntensity(_filterIntensity);
+    }
+
     debugPrint('Filter changed to: ${filter.name} (${filter.effectFile})');
   }
 
@@ -255,6 +261,12 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {
       _filterIntensity = value;
     });
+
+    // Update DeepAR filter intensity if initialized
+    if (_isDeepARInitialized) {
+      _deepARService.setFilterIntensity(value);
+    }
+
     debugPrint('Intensity: ${(value * 100).toInt()}%');
   }
 

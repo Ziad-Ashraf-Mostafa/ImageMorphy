@@ -220,4 +220,40 @@ class DeepARService {
       return false;
     }
   }
+
+  /// Change a float parameter on a DeepAR effect
+  /// [gameObject] - The name of the GameObject in the effect (e.g., 'FilterNode')
+  /// [component] - The component name, typically 'MeshRenderer' for materials
+  /// [parameter] - The uniform variable name (e.g., 'u_intensity')
+  /// [value] - The float value to set (typically 0.0 to 1.0)
+  Future<bool> changeParameterFloat({
+    required String gameObject,
+    required String component,
+    required String parameter,
+    required double value,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('changeParameterFloat', {
+        'gameObject': gameObject,
+        'component': component,
+        'parameter': parameter,
+        'value': value,
+      });
+      return result as bool? ?? true;
+    } catch (e) {
+      print('Change parameter float error: $e');
+      return false;
+    }
+  }
+
+  /// Convenience method to set filter intensity
+  /// Uses the standard FilterNode/u_intensity convention
+  Future<bool> setFilterIntensity(double intensity) async {
+    return changeParameterFloat(
+      gameObject: 'FilterNode',
+      component: 'MeshRenderer',
+      parameter: 'u_intensity',
+      value: intensity.clamp(0.0, 1.0),
+    );
+  }
 }

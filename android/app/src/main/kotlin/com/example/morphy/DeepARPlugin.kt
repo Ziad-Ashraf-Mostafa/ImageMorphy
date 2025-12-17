@@ -150,6 +150,13 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
                 classificationEnabled = call.argument<Boolean>("enabled") ?: true
                 result.success(true)
             }
+            "changeParameterFloat" -> {
+                val gameObject = call.argument<String>("gameObject") ?: ""
+                val component = call.argument<String>("component") ?: "MeshRenderer"
+                val parameter = call.argument<String>("parameter") ?: ""
+                val value = call.argument<Double>("value")?.toFloat() ?: 0f
+                changeParameterFloat(gameObject, component, parameter, value, result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -394,6 +401,34 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
         currentEffect = (currentEffect - 1 + effects.size) % effects.size
         deepAR?.switchEffect("effect", getFilterPath(effects[currentEffect]))
         result.success(effects[currentEffect])
+    }
+    
+    /**
+     * Change a float parameter on a DeepAR effect
+     * @param gameObject The name of the GameObject in the effect (e.g., "FilterNode")
+     * @param component The component name (e.g., "MeshRenderer")
+     * @param parameter The uniform variable name (e.g., "u_intensity")
+     * @param value The float value to set
+     */
+    private fun changeParameterFloat(
+        gameObject: String,
+        component: String,
+        parameter: String,
+        value: Float,
+        result: Result
+    ) {
+        try {
+            if (!isDeepARInitialized || deepAR == null) {
+                result.error("NOT_INITIALIZED", "DeepAR is not initialized", null)
+                return
+            }
+            
+            deepAR?.changeParameterFloat(gameObject, component, parameter, value)
+            result.success(true)
+        } catch (e: Exception) {
+            android.util.Log.e("DeepARPlugin", "changeParameterFloat error: ${e.message}")
+            result.error("PARAMETER_ERROR", e.message, null)
+        }
     }
     
     private fun takeScreenshot(result: Result) {
