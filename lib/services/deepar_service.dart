@@ -246,14 +246,98 @@ class DeepARService {
     }
   }
 
-  /// Convenience method to set filter intensity
-  /// Uses the standard FilterNode/u_intensity convention
+  /// Change a vec4 parameter on a DeepAR effect (e.g., for RGBA color control)
+  Future<bool> changeParameterVec4({
+    required String gameObject,
+    required String component,
+    required String parameter,
+    required double x,
+    required double y,
+    required double z,
+    required double w,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('changeParameterVec4', {
+        'gameObject': gameObject,
+        'component': component,
+        'parameter': parameter,
+        'x': x,
+        'y': y,
+        'z': z,
+        'w': w,
+      });
+      return result as bool? ?? true;
+    } catch (e) {
+      print('Change parameter vec4 error: $e');
+      return false;
+    }
+  }
+
+  /// Set filter intensity using multiple approaches for compatibility
+  /// Tries different parameter names commonly used in DeepAR effects
   Future<bool> setFilterIntensity(double intensity) async {
-    return changeParameterFloat(
-      gameObject: 'FilterNode',
-      component: 'MeshRenderer',
-      parameter: 'u_intensity',
-      value: intensity.clamp(0.0, 1.0),
-    );
+    final clampedValue = intensity.clamp(0.0, 1.0);
+
+    // Try multiple common parameter configurations
+    // These are common names used in DeepAR effects
+    final attempts = [
+      // Standard intensity parameters
+      {
+        'gameObject': 'FilterNode',
+        'component': 'MeshRenderer',
+        'parameter': 'u_intensity',
+      },
+      {
+        'gameObject': 'effect',
+        'component': 'MeshRenderer',
+        'parameter': 'u_intensity',
+      },
+      {
+        'gameObject': 'root',
+        'component': 'MeshRenderer',
+        'parameter': 'u_intensity',
+      },
+      // Opacity/alpha parameters
+      {
+        'gameObject': 'FilterNode',
+        'component': 'MeshRenderer',
+        'parameter': 'u_alpha',
+      },
+      {
+        'gameObject': 'effect',
+        'component': 'MeshRenderer',
+        'parameter': 'u_alpha',
+      },
+      // Mix/blend parameters
+      {
+        'gameObject': 'FilterNode',
+        'component': 'MeshRenderer',
+        'parameter': 'u_mix',
+      },
+      {
+        'gameObject': 'effect',
+        'component': 'MeshRenderer',
+        'parameter': 'u_mix',
+      },
+    ];
+
+    bool anySuccess = false;
+    for (final attempt in attempts) {
+      final success = await changeParameterFloat(
+        gameObject: attempt['gameObject']!,
+        component: attempt['component']!,
+        parameter: attempt['parameter']!,
+        value: clampedValue,
+      );
+      if (success) {
+        anySuccess = true;
+        print(
+          'setFilterIntensity: success with ${attempt['gameObject']}/${attempt['parameter']}',
+        );
+        break;
+      }
+    }
+
+    return anySuccess;
   }
 }

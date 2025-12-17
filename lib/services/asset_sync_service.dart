@@ -116,10 +116,23 @@ class AssetSyncService {
     if (url.contains('raw.githubusercontent.com')) {
       // Remove query parameters from filename (e.g. ?token=...)
       final fileName = url.split('/').last.split('?').first;
+      final localFile = File('${localDir.path}/$fileName');
+
+      // Check if file already exists
+      if (await localFile.exists()) {
+        debugPrint('File already exists: $fileName');
+        existing.add(fileName);
+        return SyncResult(
+          downloadedFiles: downloaded,
+          existingFiles: existing,
+          failedFiles: failed,
+        );
+      }
+
       debugPrint('Detected Raw GitHub link. Downloading: $fileName');
       onProgress?.call('Downloading $fileName...', 0.5, fileName);
       try {
-        await _downloadFile(url, File('${localDir.path}/$fileName'));
+        await _downloadFile(url, localFile);
         downloaded.add(fileName);
       } catch (e) {
         failed.add(fileName);
@@ -152,12 +165,25 @@ class AssetSyncService {
         return await _processGenericSource(rawUrl, localDir, onProgress);
       }
 
+      final localFile = File('${localDir.path}/$fileName');
+
+      // Check if file already exists
+      if (await localFile.exists()) {
+        debugPrint('File already exists: $fileName');
+        existing.add(fileName);
+        return SyncResult(
+          downloadedFiles: downloaded,
+          existingFiles: existing,
+          failedFiles: failed,
+        );
+      }
+
       debugPrint('Detected GitHub blob. Downloading via raw param: $fileName');
       debugPrint('Target Path: ${localDir.path}/$fileName');
 
       onProgress?.call('Downloading $fileName...', 0.5, fileName);
       try {
-        await _downloadFile(rawUrl, File('${localDir.path}/$fileName'));
+        await _downloadFile(rawUrl, localFile);
         downloaded.add(fileName);
       } catch (e) {
         failed.add(fileName);

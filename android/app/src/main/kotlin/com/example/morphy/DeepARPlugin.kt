@@ -157,6 +157,16 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
                 val value = call.argument<Double>("value")?.toFloat() ?: 0f
                 changeParameterFloat(gameObject, component, parameter, value, result)
             }
+            "changeParameterVec4" -> {
+                val gameObject = call.argument<String>("gameObject") ?: ""
+                val component = call.argument<String>("component") ?: "MeshRenderer"
+                val parameter = call.argument<String>("parameter") ?: ""
+                val x = call.argument<Double>("x")?.toFloat() ?: 0f
+                val y = call.argument<Double>("y")?.toFloat() ?: 0f
+                val z = call.argument<Double>("z")?.toFloat() ?: 0f
+                val w = call.argument<Double>("w")?.toFloat() ?: 1f
+                changeParameterVec4(gameObject, component, parameter, x, y, z, w, result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -419,14 +429,47 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
     ) {
         try {
             if (!isDeepARInitialized || deepAR == null) {
+                android.util.Log.e("DeepARPlugin", "changeParameterFloat: DeepAR not initialized")
                 result.error("NOT_INITIALIZED", "DeepAR is not initialized", null)
                 return
             }
             
+            android.util.Log.d("DeepARPlugin", "changeParameterFloat: gameObject=$gameObject, component=$component, parameter=$parameter, value=$value")
             deepAR?.changeParameterFloat(gameObject, component, parameter, value)
+            android.util.Log.d("DeepARPlugin", "changeParameterFloat: success")
             result.success(true)
         } catch (e: Exception) {
             android.util.Log.e("DeepARPlugin", "changeParameterFloat error: ${e.message}")
+            result.error("PARAMETER_ERROR", e.message, null)
+        }
+    }
+    
+    /**
+     * Change a vec4 parameter on a DeepAR effect (e.g., for color/RGBA control)
+     */
+    private fun changeParameterVec4(
+        gameObject: String,
+        component: String,
+        parameter: String,
+        x: Float,
+        y: Float,
+        z: Float,
+        w: Float,
+        result: Result
+    ) {
+        try {
+            if (!isDeepARInitialized || deepAR == null) {
+                android.util.Log.e("DeepARPlugin", "changeParameterVec4: DeepAR not initialized")
+                result.error("NOT_INITIALIZED", "DeepAR is not initialized", null)
+                return
+            }
+            
+            android.util.Log.d("DeepARPlugin", "changeParameterVec4: gameObject=$gameObject, component=$component, parameter=$parameter, value=($x, $y, $z, $w)")
+            deepAR?.changeParameterVec4(gameObject, component, parameter, x, y, z, w)
+            android.util.Log.d("DeepARPlugin", "changeParameterVec4: success")
+            result.success(true)
+        } catch (e: Exception) {
+            android.util.Log.e("DeepARPlugin", "changeParameterVec4 error: ${e.message}")
             result.error("PARAMETER_ERROR", e.message, null)
         }
     }
