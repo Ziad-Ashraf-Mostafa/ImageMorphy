@@ -4,11 +4,35 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 
+/// Result of a sync operation with details about downloaded files
+class SyncResult {
+  final List<String> downloadedFiles;
+  final List<String> existingFiles;
+  final List<String> failedFiles;
+  final Map<String, List<String>> filesByCategory;
+
+  SyncResult({
+    this.downloadedFiles = const [],
+    this.existingFiles = const [],
+    this.failedFiles = const [],
+    this.filesByCategory = const {},
+  });
+
+  int get totalFiles =>
+      downloadedFiles.length + existingFiles.length + failedFiles.length;
+  int get successCount => downloadedFiles.length + existingFiles.length;
+}
+
+/// Callback for sync progress updates
+typedef SyncProgressCallback =
+    void Function(String status, double progress, String? currentFile);
+
 class AssetSyncService {
   /// Syncs local files with a remote source (JSON manifest, GitHub folder, or specific file).
   ///
   /// [targetUrl]: The URL of the source (JSON manifest, GitHub file, or GitHub folder).
   /// [localFolderName]: The name of the local folder to sync (e.g., 'asset_test').
+  /// [onProgress]: Optional callback for progress updates.
   ///
   /// Valid formats for [targetUrl]:
   /// - JSON Manifest: "https://myserver.com/manifest.json"
@@ -24,11 +48,13 @@ class AssetSyncService {
   ///   "both_files": [{"name": "file.deepar", "url": "..."}]
   /// }
   /// ```
-  Future<void> syncAssets({
+  Future<SyncResult> syncAssets({
     required String targetUrl,
     required String localFolderName,
+    SyncProgressCallback? onProgress,
   }) async {
     debugPrint('Starting sync for $localFolderName from $targetUrl...');
+    onProgress?.call('Connecting...', 0.0, null);
 
     // 1. Setup Local Directory - Always use internal app storage
     final baseDir = await getApplicationDocumentsDirectory();
@@ -40,13 +66,19 @@ class AssetSyncService {
     }
 
     // 2. Identify Source Type
+    SyncResult result;
     if (_isGitHubUrl(targetUrl)) {
-      await _syncGitHubSource(targetUrl, localDir);
+      result = await _syncGitHubSource(targetUrl, localDir, onProgress);
     } else {
-      await _processGenericSource(targetUrl, localDir);
+      result = await _processGenericSource(targetUrl, localDir, onProgress);
     }
 
     debugPrint('Asset sync completed for $localFolderName');
+    debugPrint(
+      'Downloaded: ${result.downloadedFiles.length}, Existing: ${result.existingFiles.length}, Failed: ${result.failedFiles.length}',
+    );
+
+    return result;
   }
 
   /// Get the base directory path for assets (internal app storage)
@@ -71,14 +103,32 @@ class AssetSyncService {
         url.contains('raw.githubusercontent.com');
   }
 
-  Future<void> _syncGitHubSource(String url, Directory localDir) async {
+  Future<SyncResult> _syncGitHubSource(
+    String url,
+    Directory localDir,
+    SyncProgressCallback? onProgress,
+  ) async {
+    final downloaded = <String>[];
+    final existing = <String>[];
+    final failed = <String>[];
+
     // 0. Handle Raw Links directly
     if (url.contains('raw.githubusercontent.com')) {
       // Remove query parameters from filename (e.g. ?token=...)
       final fileName = url.split('/').last.split('?').first;
       debugPrint('Detected Raw GitHub link. Downloading: $fileName');
-      await _downloadFile(url, File('${localDir.path}/$fileName'));
-      return;
+      onProgress?.call('Downloading $fileName...', 0.5, fileName);
+      try {
+        await _downloadFile(url, File('${localDir.path}/$fileName'));
+        downloaded.add(fileName);
+      } catch (e) {
+        failed.add(fileName);
+      }
+      return SyncResult(
+        downloadedFiles: downloaded,
+        existingFiles: existing,
+        failedFiles: failed,
+      );
     }
 
     // 1. Direct File Handling (Blob)
@@ -92,11 +142,31 @@ class AssetSyncService {
       final rawFileName = cleanUrl.split('/').last;
       final fileName = Uri.decodeComponent(rawFileName);
 
+      // Check if this is a JSON manifest file - if so, process it as a manifest
+      if (fileName.toLowerCase().endsWith('.json')) {
+        debugPrint('Detected GitHub blob pointing to JSON manifest: $fileName');
+        debugPrint('Fetching and parsing as manifest...');
+        onProgress?.call('Fetching manifest...', 0.1, null);
+
+        // Fetch the JSON content and process it as a generic source (manifest)
+        return await _processGenericSource(rawUrl, localDir, onProgress);
+      }
+
       debugPrint('Detected GitHub blob. Downloading via raw param: $fileName');
       debugPrint('Target Path: ${localDir.path}/$fileName');
 
-      await _downloadFile(rawUrl, File('${localDir.path}/$fileName'));
-      return;
+      onProgress?.call('Downloading $fileName...', 0.5, fileName);
+      try {
+        await _downloadFile(rawUrl, File('${localDir.path}/$fileName'));
+        downloaded.add(fileName);
+      } catch (e) {
+        failed.add(fileName);
+      }
+      return SyncResult(
+        downloadedFiles: downloaded,
+        existingFiles: existing,
+        failedFiles: failed,
+      );
     }
 
     // 2. Directory Handling (Tree or Root)
@@ -105,7 +175,13 @@ class AssetSyncService {
     final segments =
         uri.pathSegments; // [USER, REPO, tree/blob, BRANCH, ...PATH]
 
-    if (segments.length < 2) return;
+    if (segments.length < 2) {
+      return SyncResult(
+        downloadedFiles: downloaded,
+        existingFiles: existing,
+        failedFiles: failed,
+      );
+    }
 
     final user = segments[0];
     final repo = segments[1];
@@ -150,6 +226,12 @@ class AssetSyncService {
       );
       throw Exception('GitHub API Failed: ${response.statusCode}');
     }
+
+    return SyncResult(
+      downloadedFiles: downloaded,
+      existingFiles: existing,
+      failedFiles: failed,
+    );
   }
 
   Future<void> _processGitHubDirectory(
@@ -227,10 +309,15 @@ class AssetSyncService {
   // Replaces _syncJsonManifest to handle any generic URL.
   // If the content is valid JSON with a "files" list, it's treated as a manifest.
   // Otherwise, it's treated as a direct file download.
-  Future<void> _processGenericSource(String url, Directory localDir) async {
+  Future<SyncResult> _processGenericSource(
+    String url,
+    Directory localDir,
+    SyncProgressCallback? onProgress,
+  ) async {
     // Detect & Convert Google Drive Links and GitHub Blobs (View -> Export/Raw)
     final directUrl = _convertToDirectDownloadUrl(url);
     debugPrint('Fetching content from generic source: $directUrl');
+    onProgress?.call('Fetching manifest...', 0.1, null);
 
     // We fetch the response first to inspect it
     final response = await http
@@ -283,22 +370,38 @@ class AssetSyncService {
       debugPrint(
         'Detected Assets Manifest (categorized). Syncing files by category...',
       );
-      await _syncAssetsManifestContent(manifest, localDir);
+      onProgress?.call('Processing manifest...', 0.2, null);
+      return await _syncAssetsManifestContent(manifest, localDir, onProgress);
     } else if (isManifest && manifest != null) {
       debugPrint('Detected Valid JSON Manifest. Syncing files...');
-      await _syncManifestContent(manifest, localDir);
+      return await _syncManifestContent(manifest, localDir, onProgress);
     } else {
       debugPrint('Not a manifest. Treating as single file download.');
-      await _saveSingleFileResponse(response, directUrl, localDir);
+      final fileName = await _saveSingleFileResponse(
+        response,
+        directUrl,
+        localDir,
+      );
+      return SyncResult(downloadedFiles: fileName != null ? [fileName] : []);
     }
   }
 
   /// Sync files from assets_manifest format (categorized by gender)
   /// Structure: { "male_files": [...], "female_files": [...], "both_files": [...] }
-  Future<void> _syncAssetsManifestContent(
+  Future<SyncResult> _syncAssetsManifestContent(
     Map<String, dynamic> manifest,
     Directory localDir,
+    SyncProgressCallback? onProgress,
   ) async {
+    final downloaded = <String>[];
+    final existing = <String>[];
+    final failed = <String>[];
+    final filesByCategory = <String, List<String>>{
+      'male': [],
+      'female': [],
+      'both': [],
+    };
+
     // Create effects directory structure
     final effectsDir = Directory('${localDir.path}/effects');
     final maleDir = Directory('${effectsDir.path}/male');
@@ -313,21 +416,105 @@ class AssetSyncService {
       }
     }
 
+    // Count total files for progress
+    int totalFiles = 0;
+    for (final category in ['male_files', 'female_files', 'both_files']) {
+      final files = manifest[category] as List<dynamic>? ?? [];
+      totalFiles += files
+          .where(
+            (f) =>
+                f is Map &&
+                f.containsKey('name') &&
+                f['name']?.toString().isNotEmpty == true,
+          )
+          .length;
+    }
+
+    int processedFiles = 0;
+
     // Process each category
-    await _syncCategoryFiles(manifest['male_files'], maleDir, 'male');
-    await _syncCategoryFiles(manifest['female_files'], femaleDir, 'female');
-    await _syncCategoryFiles(manifest['both_files'], bothDir, 'both');
+    final maleResult = await _syncCategoryFilesWithResult(
+      manifest['male_files'],
+      maleDir,
+      'male',
+      (current) {
+        processedFiles++;
+        final progress = 0.2 + (processedFiles / totalFiles) * 0.7;
+        onProgress?.call('Downloading $current...', progress, current);
+      },
+    );
+    downloaded.addAll(maleResult.downloadedFiles);
+    existing.addAll(maleResult.existingFiles);
+    failed.addAll(maleResult.failedFiles);
+    filesByCategory['male'] = [
+      ...maleResult.downloadedFiles,
+      ...maleResult.existingFiles,
+    ];
+
+    final femaleResult = await _syncCategoryFilesWithResult(
+      manifest['female_files'],
+      femaleDir,
+      'female',
+      (current) {
+        processedFiles++;
+        final progress = 0.2 + (processedFiles / totalFiles) * 0.7;
+        onProgress?.call('Downloading $current...', progress, current);
+      },
+    );
+    downloaded.addAll(femaleResult.downloadedFiles);
+    existing.addAll(femaleResult.existingFiles);
+    failed.addAll(femaleResult.failedFiles);
+    filesByCategory['female'] = [
+      ...femaleResult.downloadedFiles,
+      ...femaleResult.existingFiles,
+    ];
+
+    final bothResult = await _syncCategoryFilesWithResult(
+      manifest['both_files'],
+      bothDir,
+      'both',
+      (current) {
+        processedFiles++;
+        final progress = 0.2 + (processedFiles / totalFiles) * 0.7;
+        onProgress?.call('Downloading $current...', progress, current);
+      },
+    );
+    downloaded.addAll(bothResult.downloadedFiles);
+    existing.addAll(bothResult.existingFiles);
+    failed.addAll(bothResult.failedFiles);
+    filesByCategory['both'] = [
+      ...bothResult.downloadedFiles,
+      ...bothResult.existingFiles,
+    ];
+
+    onProgress?.call('Sync complete!', 1.0, null);
+
+    return SyncResult(
+      downloadedFiles: downloaded,
+      existingFiles: existing,
+      failedFiles: failed,
+      filesByCategory: filesByCategory,
+    );
   }
 
-  /// Sync files for a specific category
-  Future<void> _syncCategoryFiles(
+  /// Sync files for a specific category and return result
+  Future<SyncResult> _syncCategoryFilesWithResult(
     List<dynamic>? fileList,
     Directory targetDir,
     String category,
+    void Function(String currentFile)? onFileProcessed,
   ) async {
+    final downloaded = <String>[];
+    final existing = <String>[];
+    final failed = <String>[];
+
     if (fileList == null || fileList.isEmpty) {
       debugPrint('No files in $category category');
-      return;
+      return SyncResult(
+        downloadedFiles: downloaded,
+        existingFiles: existing,
+        failedFiles: failed,
+      );
     }
 
     // Filter out empty objects
@@ -343,7 +530,11 @@ class AssetSyncService {
 
     if (validFiles.isEmpty) {
       debugPrint('No valid files in $category category');
-      return;
+      return SyncResult(
+        downloadedFiles: downloaded,
+        existingFiles: existing,
+        failedFiles: failed,
+      );
     }
 
     final Set<String> serverFileNames = validFiles
@@ -369,24 +560,40 @@ class AssetSyncService {
       final String fileUrl = _convertToDirectDownloadUrl(fileItem['url']);
       final File localFile = File('${targetDir.path}/$fileName');
 
+      onFileProcessed?.call(fileName);
+
       if (!await localFile.exists()) {
         debugPrint('Downloading $category/$fileName...');
         try {
           await _downloadFile(fileUrl, localFile);
           debugPrint('Success! Downloaded to: ${localFile.path}');
+          downloaded.add(fileName);
         } catch (e) {
           debugPrint('Failed to download $fileName: $e');
+          failed.add(fileName);
         }
       } else {
         debugPrint('File exists: $category/$fileName');
+        existing.add(fileName);
       }
     }
+
+    return SyncResult(
+      downloadedFiles: downloaded,
+      existingFiles: existing,
+      failedFiles: failed,
+    );
   }
 
-  Future<void> _syncManifestContent(
+  Future<SyncResult> _syncManifestContent(
     Map<String, dynamic> manifest,
     Directory localDir,
+    SyncProgressCallback? onProgress,
   ) async {
+    final downloaded = <String>[];
+    final existing = <String>[];
+    final failed = <String>[];
+
     final List<dynamic> fileList = manifest['files'] ?? [];
     final Set<String> serverFileNames = fileList
         .map((f) => f['name'].toString())
@@ -405,20 +612,39 @@ class AssetSyncService {
     }
 
     // Download
+    int processed = 0;
     for (var fileItem in fileList) {
       final String fileName = fileItem['name'];
       final String fileUrl = _convertToDirectDownloadUrl(fileItem['url']);
       final File localFile = File('${localDir.path}/$fileName');
 
+      processed++;
+      final progress = 0.2 + (processed / fileList.length) * 0.7;
+      onProgress?.call('Downloading $fileName...', progress, fileName);
+
       if (!await localFile.exists()) {
         debugPrint('Downloading $fileName...');
-        await _downloadFile(fileUrl, localFile);
-        debugPrint('Success! Downloaded to: ${localFile.path}');
+        try {
+          await _downloadFile(fileUrl, localFile);
+          debugPrint('Success! Downloaded to: ${localFile.path}');
+          downloaded.add(fileName);
+        } catch (e) {
+          debugPrint('Failed to download $fileName: $e');
+          failed.add(fileName);
+        }
+      } else {
+        existing.add(fileName);
       }
     }
+
+    return SyncResult(
+      downloadedFiles: downloaded,
+      existingFiles: existing,
+      failedFiles: failed,
+    );
   }
 
-  Future<void> _saveSingleFileResponse(
+  Future<String?> _saveSingleFileResponse(
     http.Response response,
     String sourceUrl,
     Directory localDir,
@@ -451,6 +677,7 @@ class AssetSyncService {
 
     final file = File('${localDir.path}/$fileName');
     await file.writeAsBytes(response.bodyBytes);
+    return fileName;
   }
 
   // --- Shared Helpers ---

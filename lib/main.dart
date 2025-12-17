@@ -24,7 +24,7 @@ class MorphyApp extends StatelessWidget {
       theme: AppTheme.darkTheme,
       home: const StartupScreen(
         manifestUrl:
-            'https://drive.google.com/file/d/1Ld6vwxPk6DZXtiI8IJZ2I5vo0Vv-KYkh/view?usp=sharing',
+            'https://github.com/Ziad-Ashraf-Mostafa/ImageMorphy/blob/main/assets_manifest.json',
         assetFolderName: 'asset_test',
         videoOutputFolderName: 'morphy_recordings',
       ),
