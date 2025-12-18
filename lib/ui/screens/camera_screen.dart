@@ -47,6 +47,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _cameraAspectRatio = 9 / 16; // Portrait aspect ratio
   bool _isDeepARInitialized = false;
   bool _isFrontCamera = true;
+  bool _isFlashOn = false;
 
   // Gender-based filters
   List<FilterItem> _currentFilters = [];
@@ -73,12 +74,23 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _initializeEffectsAndDeepAR() async {
-    // Initialize the gender effects service first
-    await GenderEffectsService.instance.initialize();
+    // Reset and re-initialize the gender effects service
+    // This ensures we pick up any newly synced assets
+    GenderEffectsService.instance.reset();
+    
+    // Initialize the gender effects service with the asset folder name
+    // This loads both bundled assets AND synced assets from GitHub
+    await GenderEffectsService.instance.initialize(
+      assetFolderName: 'morphy_assets',
+    );
 
     // Set initial filters (unknown gender = both only)
     setState(() {
       _currentFilters = GenderEffectsService.instance.getUnknownGenderFilters();
+      debugPrint('Initial filters set: ${_currentFilters.length} filters');
+      for (final f in _currentFilters) {
+        debugPrint('  - ${f.name}: ${f.effectFile}');
+      }
     });
 
     // Now setup DeepAR
@@ -246,15 +258,33 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {
       _selectedFilterIndex = index;
     });
+    
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('🎭 FILTER CHANGED');
+    debugPrint('  Name: ${filter.name}');
+    debugPrint('  Effect file: ${filter.effectFile}');
+    debugPrint('  Is absolute path: ${filter.effectFile.startsWith("/")}');
+    debugPrint('═══════════════════════════════════════════');
+    
     // Switch DeepAR effect
     _deepARService.switchEffect(filter.effectFile);
-    debugPrint('Filter changed to: ${filter.name} (${filter.effectFile})');
+
+    // Apply current intensity to the new filter
+    if (_isDeepARInitialized) {
+      _deepARService.setFilterIntensity(_filterIntensity);
+    }
   }
 
   void _onIntensityChanged(double value) {
     setState(() {
       _filterIntensity = value;
     });
+
+    // Update DeepAR filter intensity if initialized
+    if (_isDeepARInitialized) {
+      _deepARService.setFilterIntensity(value);
+    }
+
     debugPrint('Intensity: ${(value * 100).toInt()}%');
   }
 
@@ -296,10 +326,30 @@ class _CameraScreenState extends State<CameraScreen> {
       });
     }
 
+    // Turn off flash when switching cameras
+    if (_isFlashOn) {
+      await _deepARService.setFlashEnabled(false);
+      setState(() {
+        _isFlashOn = false;
+      });
+    }
+
     await _deepARService.switchCamera();
     setState(() {
       _isFrontCamera = !_isFrontCamera;
     });
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_isFrontCamera) return; // Flash only works with back camera
+
+    final newState = !_isFlashOn;
+    final success = await _deepARService.setFlashEnabled(newState);
+    if (success) {
+      setState(() {
+        _isFlashOn = newState;
+      });
+    }
   }
 
   @override
@@ -381,7 +431,7 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  /// Top bar with gender indicator and camera switch
+  /// Top bar with gender indicator, flash button, and camera switch
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -405,11 +455,30 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // Camera switch button (right)
-          IconButton(
-            onPressed: _cycleCamera,
-            icon: const Icon(Icons.cameraswitch_outlined, color: Colors.white),
-            tooltip: 'Switch Camera',
+          // Flash and Camera switch buttons (right)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Flash button - only visible when back camera is active
+              if (!_isFrontCamera)
+                IconButton(
+                  onPressed: _toggleFlash,
+                  icon: Icon(
+                    _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                    color: _isFlashOn ? Colors.yellow : Colors.white,
+                  ),
+                  tooltip: _isFlashOn ? 'Turn off flash' : 'Turn on flash',
+                ),
+              // Camera switch button
+              IconButton(
+                onPressed: _cycleCamera,
+                icon: const Icon(
+                  Icons.cameraswitch_outlined,
+                  color: Colors.white,
+                ),
+                tooltip: 'Switch Camera',
+              ),
+            ],
           ),
         ],
       ),

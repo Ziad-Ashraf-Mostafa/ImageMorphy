@@ -47,6 +47,10 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
     private var recording = false
     private var videoFileName: File? = null
     
+    // Flash/torch state
+    private var isFlashEnabled = false
+    private var camera: Camera? = null
+    
     // Gender classification
     private var genderClassifier: GenderClassifier? = null
     private var classificationEnabled = true
@@ -122,6 +126,27 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
             "setClassificationEnabled" -> {
                 classificationEnabled = call.argument<Boolean>("enabled") ?: true
                 result.success(true)
+            }
+            "setFlashEnabled" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                setFlashEnabled(enabled, result)
+            }
+            "changeParameterFloat" -> {
+                val gameObject = call.argument<String>("gameObject") ?: ""
+                val component = call.argument<String>("component") ?: "MeshRenderer"
+                val parameter = call.argument<String>("parameter") ?: ""
+                val value = call.argument<Double>("value")?.toFloat() ?: 0f
+                changeParameterFloat(gameObject, component, parameter, value, result)
+            }
+            "changeParameterVec4" -> {
+                val gameObject = call.argument<String>("gameObject") ?: ""
+                val component = call.argument<String>("component") ?: "MeshRenderer"
+                val parameter = call.argument<String>("parameter") ?: ""
+                val x = call.argument<Double>("x")?.toFloat() ?: 0f
+                val y = call.argument<Double>("y")?.toFloat() ?: 0f
+                val z = call.argument<Double>("z")?.toFloat() ?: 0f
+                val w = call.argument<Double>("w")?.toFloat() ?: 1f
+                changeParameterVec4(gameObject, component, parameter, x, y, z, w, result)
             }
             else -> {
                 result.notImplemented()
@@ -199,11 +224,14 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
         }
         
         cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
+        camera = cameraProvider.bindToLifecycle(
             activity as LifecycleOwner,
             cameraSelector,
             imageAnalysis
         )
+        
+        // Reset flash state when camera is bound
+        isFlashEnabled = false
     }
     
     private fun processImage(image: ImageProxy) {
@@ -331,6 +359,9 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
             CameraSelector.LENS_FACING_FRONT
         }
         
+        // Turn off flash when switching cameras
+        isFlashEnabled = false
+        
         try {
             val cameraProvider = cameraProviderFuture?.get()
             cameraProvider?.unbindAll()
@@ -338,6 +369,35 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
             result.success(true)
         } catch (e: Exception) {
             result.error("SWITCH_ERROR", e.message, null)
+        }
+    }
+    
+    private fun setFlashEnabled(enabled: Boolean, result: Result) {
+        try {
+            // Flash only works with back camera
+            if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                android.util.Log.d("DeepARPlugin", "Flash not available on front camera")
+                result.success(false)
+                return
+            }
+            
+            camera?.let { cam ->
+                if (cam.cameraInfo.hasFlashUnit()) {
+                    cam.cameraControl.enableTorch(enabled)
+                    isFlashEnabled = enabled
+                    android.util.Log.d("DeepARPlugin", "Flash ${if (enabled) "enabled" else "disabled"}")
+                    result.success(true)
+                } else {
+                    android.util.Log.d("DeepARPlugin", "Device does not have flash unit")
+                    result.success(false)
+                }
+            } ?: run {
+                android.util.Log.e("DeepARPlugin", "Camera not available")
+                result.success(false)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("DeepARPlugin", "setFlashEnabled error: ${e.message}")
+            result.error("FLASH_ERROR", e.message, null)
         }
     }
     
@@ -351,26 +411,28 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
         android.util.Log.d("DeepARPlugin", "getFilterPath input: $filterName")
         
         // Check if this is already an absolute path (from synced assets)
-        // Absolute paths start with / or contain :// (like file://)
-        if (filterName.startsWith("/") || filterName.contains("://")) {
-            // For absolute paths, use file:// protocol if not already present
-            val result = if (filterName.startsWith("file://")) {
-                filterName
-            } else {
-                "file://$filterName"
+        if (filterName.startsWith("/")) {
+            // External file - use raw absolute path
+            val file = java.io.File(filterName)
+            android.util.Log.d("DeepARPlugin", "External file check - exists: ${file.exists()}, readable: ${file.canRead()}, size: ${if(file.exists()) file.length() else 0}")
+            
+            if (!file.exists()) {
+                android.util.Log.e("DeepARPlugin", "External file does not exist: $filterName")
+                return null
             }
-            android.util.Log.d("DeepARPlugin", "getFilterPath absolute result: $result")
             
-            // Verify file exists
-            val filePath = result.removePrefix("file://")
-            val file = java.io.File(filePath)
-            android.util.Log.d("DeepARPlugin", "File exists: ${file.exists()}, readable: ${file.canRead()}, size: ${if(file.exists()) file.length() else 0}")
-            
-            return result
+            // Try raw path first (DeepAR might accept it directly)
+            android.util.Log.d("DeepARPlugin", "getFilterPath using raw path: $filterName")
+            return filterName
+        }
+        
+        // Check if it's already a URI
+        if (filterName.contains("://")) {
+            android.util.Log.d("DeepARPlugin", "getFilterPath already URI: $filterName")
+            return filterName
         }
         
         // For relative paths (bundled assets), prepend the flutter assets path
-        // The filterName includes the subdirectory (e.g., "male/beard.deepar")
         val result = "file:///android_asset/flutter_assets/assets/effects/$filterName"
         android.util.Log.d("DeepARPlugin", "getFilterPath bundled result: $result")
         return result
@@ -381,7 +443,38 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
         effectName?.let {
             val path = getFilterPath(it)
             android.util.Log.d("DeepARPlugin", "switchEffect path: $path")
-            deepAR?.switchEffect("effect", path)
+            
+            if (path == null) {
+                // Clear effect
+                deepAR?.switchEffect("effect", null as String?)
+                result.success(true)
+                return
+            }
+            
+            // Check if this is an external file (absolute path without android_asset)
+            if (path.startsWith("/") && !path.contains("android_asset")) {
+                val file = java.io.File(path)
+                android.util.Log.d("DeepARPlugin", "switchEffect external file:")
+                android.util.Log.d("DeepARPlugin", "  - path: $path")
+                android.util.Log.d("DeepARPlugin", "  - exists: ${file.exists()}")
+                android.util.Log.d("DeepARPlugin", "  - canRead: ${file.canRead()}")
+                android.util.Log.d("DeepARPlugin", "  - length: ${if(file.exists()) file.length() else 0}")
+                
+                if (!file.exists() || !file.canRead()) {
+                    android.util.Log.e("DeepARPlugin", "Cannot read external file!")
+                    result.error("FILE_ERROR", "Cannot read effect file", null)
+                    return
+                }
+                
+                // For external files, pass the raw path directly (no file:// prefix)
+                android.util.Log.d("DeepARPlugin", "  - calling switchEffect with raw path")
+                deepAR?.switchEffect("effect", path)
+            } else {
+                // Bundled asset - use the URI format
+                android.util.Log.d("DeepARPlugin", "  - calling switchEffect with bundled path: $path")
+                deepAR?.switchEffect("effect", path)
+            }
+            
             result.success(true)
         } ?: result.error("INVALID_EFFECT", "Effect name is null", null)
     }
@@ -389,6 +482,67 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
     // nextEffect and previousEffect methods removed
     // All effect management is now handled dynamically from Flutter
     // via GenderEffectsService which loads effects from assets/effects/
+    
+    /**
+     * Change a float parameter on a DeepAR effect
+     * @param gameObject The name of the GameObject in the effect (e.g., "FilterNode")
+     * @param component The component name (e.g., "MeshRenderer")
+     * @param parameter The uniform variable name (e.g., "u_intensity")
+     * @param value The float value to set
+     */
+    private fun changeParameterFloat(
+        gameObject: String,
+        component: String,
+        parameter: String,
+        value: Float,
+        result: Result
+    ) {
+        try {
+            if (!isDeepARInitialized || deepAR == null) {
+                android.util.Log.e("DeepARPlugin", "changeParameterFloat: DeepAR not initialized")
+                result.error("NOT_INITIALIZED", "DeepAR is not initialized", null)
+                return
+            }
+            
+            android.util.Log.d("DeepARPlugin", "changeParameterFloat: gameObject=$gameObject, component=$component, parameter=$parameter, value=$value")
+            deepAR?.changeParameterFloat(gameObject, component, parameter, value)
+            android.util.Log.d("DeepARPlugin", "changeParameterFloat: success")
+            result.success(true)
+        } catch (e: Exception) {
+            android.util.Log.e("DeepARPlugin", "changeParameterFloat error: ${e.message}")
+            result.error("PARAMETER_ERROR", e.message, null)
+        }
+    }
+    
+    /**
+     * Change a vec4 parameter on a DeepAR effect (e.g., for color/RGBA control)
+     */
+    private fun changeParameterVec4(
+        gameObject: String,
+        component: String,
+        parameter: String,
+        x: Float,
+        y: Float,
+        z: Float,
+        w: Float,
+        result: Result
+    ) {
+        try {
+            if (!isDeepARInitialized || deepAR == null) {
+                android.util.Log.e("DeepARPlugin", "changeParameterVec4: DeepAR not initialized")
+                result.error("NOT_INITIALIZED", "DeepAR is not initialized", null)
+                return
+            }
+            
+            android.util.Log.d("DeepARPlugin", "changeParameterVec4: gameObject=$gameObject, component=$component, parameter=$parameter, value=($x, $y, $z, $w)")
+            deepAR?.changeParameterVec4(gameObject, component, parameter, x, y, z, w)
+            android.util.Log.d("DeepARPlugin", "changeParameterVec4: success")
+            result.success(true)
+        } catch (e: Exception) {
+            android.util.Log.e("DeepARPlugin", "changeParameterVec4 error: ${e.message}")
+            result.error("PARAMETER_ERROR", e.message, null)
+        }
+    }
     
     private fun takeScreenshot(result: Result) {
         deepAR?.takeScreenshot()
@@ -531,6 +685,7 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
     }
     
     override fun error(errorType: ARErrorType?, errorMessage: String?) {
+        android.util.Log.e("DeepARPlugin", "DeepAR ERROR: type=$errorType, message=$errorMessage")
         activity?.runOnUiThread {
             channel.invokeMethod("onError", mapOf(
                 "errorType" to errorType?.toString(),
@@ -540,6 +695,7 @@ class DeepARPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, AREventLis
     }
     
     override fun effectSwitched(effectName: String?) {
+        android.util.Log.d("DeepARPlugin", "DeepAR effectSwitched callback: $effectName")
         activity?.runOnUiThread {
             channel.invokeMethod("onEffectSwitched", mapOf("effectName" to effectName))
         }
